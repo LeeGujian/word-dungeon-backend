@@ -1,6 +1,6 @@
 // api/eval.js
-// Vercel Serverless Function (Edge / Node 18+)
-// 在 Vercel 上运行，用 OPENAI_API_KEY 调用 OpenAI
+// 最终版：支持英文 + 德语写作评分，返回统一 JSON 结构
+// 在 Vercel 上运行，使用环境变量 OPENAI_API_KEY 调用 OpenAI
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -20,36 +20,70 @@ export default async function handler(req, res) {
       throw new Error("OPENAI_API_KEY is not set");
     }
 
-const prompt = `
+    const prompt = `
 You are a multilingual writing examiner and grammar coach.
-You can evaluate and correct writing in both English and German.
+You can evaluate and correct writing in both ENGLISH and GERMAN.
 
-When the user writes a sentence, first detect the language:
-- If it is English → grade according to English grammar, logic, vocabulary richness.
-- If it is German → grade according to German grammar, sentence structure (Wortstellung), verb conjugation, cases (Nominativ / Akkusativ / Dativ / Genitiv), clarity, and logic.
+TASK CONTEXT:
+The student is playing an image description game.
+They see a picture with this theme: "${theme}".
+The image tags (objects / ideas in the scene) are: ${tags}.
 
-You must:
+The student wrote this description:
 
-1. Identify the language (English or German).
-2. Give a score from 0–1000 based on:
-   - Grammar correctness
-   - Logical consistency with the given image theme + tags
-   - Richness of vocabulary
-   - Completeness and clarity of the description
-3. Point out ALL grammar or logical mistakes.
-4. Provide a corrected version.
-5. Provide an improved high-level version.
-6. Return everything in pure JSON:
+"""${text}"""
+
+INSTRUCTIONS:
+
+1. First, detect the language of the student's text:
+   - If it is English → evaluate as an English text.
+   - If it is German → evaluate as a German text.
+
+2. Evaluate the text based on:
+   - Relevance to the given theme and tags.
+   - Richness of content (details, vocabulary, interesting ideas).
+   - Logical structure and coherence (does it make sense, good flow?).
+   - Grammar, vocabulary, and style in that language.
+
+3. Give a total score from 0 to 1000 (integer):
+   - Think of 600 as a clear pass level.
+   - 800+ is very good, 900+ is excellent.
+
+4. Identify grammar and style problems:
+   - For English: tense errors, wrong prepositions, word choice, sentence structure, etc.
+   - For German: verb position (Wortstellung), conjugation, cases (Nominativ/Akkusativ/Dativ/Genitiv),
+     article endings, word order in main and subordinate clauses, etc.
+
+5. Provide:
+   - A short breakdown (3–6 lines) of how you judged relevance, richness, logic and grammar.
+   - A more detailed explanation to help the student improve.
+   - A list of grammar/style issues as short bullet-like sentences.
+   - A corrected version that fixes errors but stays close to the student's style.
+   - A clearly improved version (richer, more natural, high-level).
+   - All of your text (breakdown, explanation, corrections) must be written
+     in the SAME LANGUAGE as the student's original text (English or German).
+
+6. RETURN FORMAT (VERY IMPORTANT):
+
+Return ONLY a strict JSON object, no markdown, no extra explanation, like:
 
 {
-  "language": "",
   "score": 0,
-  "mistakes": [],
-  "correction": "",
-  "improved": ""
+  "passed": false,
+  "breakdown": "",
+  "explanation": "",
+  "grammarIssues": [],
+  "betterVersion": ""
 }
 
-Make sure the JSON is always valid and never include explanations outside the JSON.
+- "score": integer from 0 to 1000
+- "passed": boolean, true if score >= 600
+- "breakdown": short explanation (3–6 lines max)
+- "explanation": a more detailed feedback block
+- "grammarIssues": array of short strings, each describing one issue
+- "betterVersion": corrected & improved version of the student's text
+
+Do NOT include anything outside of the JSON.
 `.trim();
 
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -62,7 +96,7 @@ Make sure the JSON is always valid and never include explanations outside the JS
         model: "gpt-4o-mini",
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: "You are a strict but friendly language examiner." },
+          { role: "system", content: "You are a strict but friendly writing examiner for both English and German. Always answer in JSON only." },
           { role: "user", content: prompt }
         ]
       })
@@ -76,7 +110,7 @@ Make sure the JSON is always valid and never include explanations outside the JS
     }
 
     const openaiJson = await openaiRes.json();
-    const content = openaiJson.choices?.[0]?.message?.content;
+    const content = openaiJson?.choices?.[0]?.message?.content;
     if (!content) {
       res.status(500).json({ error: "No content from OpenAI" });
       return;
@@ -91,7 +125,17 @@ Make sure the JSON is always valid and never include explanations outside the JS
       return;
     }
 
-    res.status(200).json(parsed);
+    // 确保字段都有（避免前端崩）
+    const response = {
+      score: typeof parsed.score === "number" ? parsed.score : 0,
+      passed: typeof parsed.passed === "boolean" ? parsed.passed : (parsed.score || 0) >= 600,
+      breakdown: parsed.breakdown || "",
+      explanation: parsed.explanation || "",
+      grammarIssues: Array.isArray(parsed.grammarIssues) ? parsed.grammarIssues : [],
+      betterVersion: parsed.betterVersion || ""
+    };
+
+    res.status(200).json(response);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal error", details: String(err) });
