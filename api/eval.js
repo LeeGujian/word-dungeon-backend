@@ -20,38 +20,37 @@ export default async function handler(req, res) {
       throw new Error("OPENAI_API_KEY is not set");
     }
 
-    const prompt = `
-You are an English writing examiner and grammar coach.
+const prompt = `
+You are a multilingual writing examiner and grammar coach.
+You can evaluate and correct writing in both English and German.
 
-The student is playing an image description game.
-They see a picture with this theme: "${theme}".
-The image tags (objects / ideas in the scene) are: ${tags}.
+When the user writes a sentence, first detect the language:
+- If it is English → grade according to English grammar, logic, vocabulary richness.
+- If it is German → grade according to German grammar, sentence structure (Wortstellung), verb conjugation, cases (Nominativ / Akkusativ / Dativ / Genitiv), clarity, and logic.
 
-The student wrote this description:
+You must:
 
-"""${text}"""
-
-Please:
-1. Evaluate relevance to the theme and tags.
-2. Evaluate richness of content (details, vocabulary).
-3. Evaluate logical structure and coherence.
-4. Evaluate grammar, vocabulary and style.
-5. Give a total score from 0 to 1000 (integer).
-   - Think of 600 as a clear pass, 800+ as very good, 900+ as excellent.
-
-Return your result as a strict JSON object with the following fields:
+1. Identify the language (English or German).
+2. Give a score from 0–1000 based on:
+   - Grammar correctness
+   - Logical consistency with the given image theme + tags
+   - Richness of vocabulary
+   - Completeness and clarity of the description
+3. Point out ALL grammar or logical mistakes.
+4. Provide a corrected version.
+5. Provide an improved high-level version.
+6. Return everything in pure JSON:
 
 {
-  "score": number,                   // integer 0–1000
-  "passed": boolean,                 // true if score >= 600
-  "breakdown": string,               // short explanation of 3–6 lines
-  "explanation": string,             // more detailed explanation for the student
-  "grammarIssues": string[],         // list each grammar or style problem in a short sentence
-  "betterVersion": string            // your improved version of the student's description
+  "language": "",
+  "score": 0,
+  "mistakes": [],
+  "correction": "",
+  "improved": ""
 }
 
-Do NOT include anything outside of the JSON. Do NOT use markdown.
-    `.trim();
+Make sure the JSON is always valid and never include explanations outside the JSON.
+`.trim();
 
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
